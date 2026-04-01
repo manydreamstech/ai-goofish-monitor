@@ -11,6 +11,7 @@ from playwright.async_api import (
     TimeoutError as PlaywrightTimeoutError,
     async_playwright,
 )
+from playwright_stealth import Stealth
 
 from src.ai_handler import (
     download_all_images,
@@ -80,6 +81,18 @@ def _is_login_url(url: str) -> bool:
         return False
     lowered = url.lower()
     return "passport.goofish.com" in lowered or "mini_login" in lowered
+
+
+def _stealth_playwright():
+    """
+    使用 playwright-stealth 包装 async_playwright，在 hook 后的
+    chromium.launch → new_context / new_page 上自动注入规避脚本与 CLI 参数。
+    语言、平台与 _default_context_options 中的移动端 Chrome UA 保持一致。
+    """
+    return Stealth(
+        navigator_languages_override=("zh-CN", "zh", "en-US", "en"),
+        chrome_runtime=True,
+    ).use_async(async_playwright())
 
 
 def _resolve_browser_channel() -> str:
@@ -472,7 +485,9 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
     result_filename = build_result_filename(keyword)
     processed_links = load_processed_link_keys(keyword)
     if processed_links:
-        print(f"LOG: 发现已存在结果集 {result_filename}，已加载 {len(processed_links)} 个历史商品用于去重。")
+        print(
+            f"LOG: 发现已存在结果集 {result_filename}，已加载 {len(processed_links)} 个历史商品用于去重。"
+        )
     else:
         print(f"LOG: 结果集 {result_filename} 当前为空，将写入新记录。")
 
@@ -549,7 +564,7 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
         except Exception as e:
             print(f"警告：读取登录状态文件失败，将直接按路径使用: {e}")
 
-        async with async_playwright() as p:
+        async with _stealth_playwright() as p:
             # 反检测启动参数
             launch_args = [
                 "--disable-blink-features=AutomationControlled",
@@ -606,30 +621,6 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                 notifier=send_ntfy_notification,
                 saver=save_to_jsonl,
             )
-
-            # 增强反检测脚本（模拟真实移动设备）
-            await context.add_init_script("""
-                // 移除webdriver标识
-                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-
-                // 模拟真实移动设备的navigator属性
-                Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
-                Object.defineProperty(navigator, 'languages', {get: () => ['zh-CN', 'zh', 'en-US', 'en']});
-
-                // 添加chrome对象
-                window.chrome = {runtime: {}, loadTimes: function() {}, csi: function() {}};
-
-                // 模拟触摸支持
-                Object.defineProperty(navigator, 'maxTouchPoints', {get: () => 5});
-
-                // 覆盖permissions查询（避免暴露自动化）
-                const originalQuery = window.navigator.permissions.query;
-                window.navigator.permissions.query = (parameters) => (
-                    parameters.name === 'notifications' ?
-                        Promise.resolve({state: Notification.permission}) :
-                        originalQuery(parameters)
-                );
-            """)
 
             page = await context.new_page()
 

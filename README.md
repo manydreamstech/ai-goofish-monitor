@@ -150,14 +150,13 @@ chmod +x start.sh
 
 ```bash
 # 后端
-python -m src.app
-# 或
-uvicorn src.app:app --host 0.0.0.0 --port 8000 --reload
+uv sync
+uv run start.py
 
 # 前端
 cd web-ui
-npm install
-npm run dev
+pnpm install
+pnpm run dev
 ```
 
 - FastAPI 启动时会自动初始化 SQLite，并在首次启动时尝试导入旧的 `config.json/jsonl/price_history`
